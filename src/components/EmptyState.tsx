@@ -26,8 +26,8 @@ export function EmptyState({ hasSearched }: EmptyStateProps) {
       </div>
       <h2 className="text-2xl font-bold text-gray-900 mb-2">Busca videos en YouTube</h2>
       <p className="text-gray-500 max-w-md leading-relaxed">
-        Escribe un término de búsqueda para encontrar videos y analizar su rendimiento:
-        views, suscriptores del canal, ratio views/subs, duración, idioma y más.
+        Busca por palabras clave o por nicho (categoría de YouTube) y analiza el
+        rendimiento: views, suscriptores, ratio views/subs, duración e idioma.
       </p>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-10 max-w-2xl">

@@ -1,12 +1,33 @@
 import { useState, useCallback, useRef } from 'react';
-import type { YouTubeVideo, SearchFilters, SortOption } from '@/types/youtube';
+import type {
+  YouTubeVideo,
+  SearchFilters,
+  SortOption,
+  YouTubeSearchParams,
+} from '@/types/youtube';
 import { searchYouTube } from '@/lib/api';
 
-const PAGE_SIZE = 10;
+function toSearchParams(
+  query: string,
+  categoryId: string,
+  filters: SearchFilters,
+  pageToken?: string
+): YouTubeSearchParams {
+  return {
+    query,
+    categoryId: categoryId || undefined,
+    publishedAfter: filters.dateFrom || undefined,
+    publishedBefore: filters.dateTo || undefined,
+    videoDuration: filters.videoDuration || undefined,
+    order: filters.order,
+    pageToken,
+  };
+}
 
 export function useYouTubeSearch() {
   const [allVideos, setAllVideos] = useState<YouTubeVideo[]>([]);
-  const [displayedCount, setDisplayedCount] = useState(0);
+  const [rawVideos, setRawVideos] = useState<YouTubeVideo[]>([]);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
@@ -14,12 +35,13 @@ export function useYouTubeSearch() {
   const [totalApiCalls, setTotalApiCalls] = useState(0);
   const [totalResults, setTotalResults] = useState(0);
 
-  const nextPageTokenRef = useRef<string | null>(null);
-  const currentQueryRef = useRef<string>('');
+  const currentQueryRef = useRef('');
+  const currentCategoryRef = useRef('');
+  const currentApiFiltersRef = useRef<SearchFilters | null>(null);
+  const rawVideosRef = useRef<YouTubeVideo[]>([]);
   const isLoadingMoreRef = useRef(false);
 
-  const displayedVideos = allVideos.slice(0, displayedCount);
-  const hasMore = displayedCount < allVideos.length || nextPageTokenRef.current !== null;
+  const hasMore = nextPageToken !== null;
 
   const applyFilters = useCallback(
     (videos: YouTubeVideo[], filters: SearchFilters): YouTubeVideo[] => {
@@ -35,18 +57,6 @@ export function useYouTubeSearch() {
 
         if (filters.minViews && v.viewCount < parseInt(filters.minViews, 10)) return false;
         if (filters.maxViews && v.viewCount > parseInt(filters.maxViews, 10)) return false;
-
-        if (filters.minDuration && v.durationSeconds < parseInt(filters.minDuration, 10)) return false;
-        if (filters.maxDuration && v.durationSeconds > parseInt(filters.maxDuration, 10)) return false;
-
-        if (filters.dateFrom) {
-          const videoDate = v.publishedAt.split('T')[0];
-          if (videoDate < filters.dateFrom) return false;
-        }
-        if (filters.dateTo) {
-          const videoDate = v.publishedAt.split('T')[0];
-          if (videoDate > filters.dateTo) return false;
-        }
 
         return true;
       });
@@ -71,28 +81,33 @@ export function useYouTubeSearch() {
   }, []);
 
   const search = useCallback(
-    async (query: string, filters: SearchFilters, sortBy: SortOption) => {
-      if (!query.trim()) return;
+    async (query: string, categoryId: string, filters: SearchFilters, sortBy: SortOption) => {
+      if (!query.trim() && !categoryId) return;
       setLoading(true);
       setError(null);
       setHasSearched(true);
       currentQueryRef.current = query;
+      currentCategoryRef.current = categoryId;
+      currentApiFiltersRef.current = filters;
+      setNextPageToken(null);
 
       try {
-        const data = await searchYouTube(query);
-        nextPageTokenRef.current = data.nextPageToken;
+        const data = await searchYouTube(toSearchParams(query, categoryId, filters));
+        setNextPageToken(data.nextPageToken);
         setTotalResults(data.totalResults);
         setQuotaUsed(data.quotaUsed);
         setTotalApiCalls(data.apiCalls);
 
+        rawVideosRef.current = data.videos;
+        setRawVideos(data.videos);
         const filtered = applyFilters(data.videos, filters);
-        const sorted = sortVideos(filtered, sortBy);
-        setAllVideos(sorted);
-        setDisplayedCount(Math.min(PAGE_SIZE, sorted.length));
+        setAllVideos(sortVideos(filtered, sortBy));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
+        rawVideosRef.current = [];
         setAllVideos([]);
-        setDisplayedCount(0);
+        setRawVideos([]);
+        setNextPageToken(null);
       } finally {
         setLoading(false);
       }
@@ -102,26 +117,31 @@ export function useYouTubeSearch() {
 
   const loadMore = useCallback(
     async (filters: SearchFilters, sortBy: SortOption) => {
-      if (loading || isLoadingMoreRef.current) return;
+      if (loading || isLoadingMoreRef.current || !nextPageToken) return;
       isLoadingMoreRef.current = true;
       setLoading(true);
       setError(null);
 
       try {
-        if (displayedCount + PAGE_SIZE <= allVideos.length) {
-          setDisplayedCount(displayedCount + PAGE_SIZE);
-        } else if (nextPageTokenRef.current) {
-          const data = await searchYouTube(currentQueryRef.current, nextPageTokenRef.current);
-          nextPageTokenRef.current = data.nextPageToken;
-          setQuotaUsed((prev) => prev + data.quotaUsed);
-          setTotalApiCalls((prev) => prev + data.apiCalls);
+        const apiFilters = currentApiFiltersRef.current ?? filters;
+        const data = await searchYouTube(
+          toSearchParams(
+            currentQueryRef.current,
+            currentCategoryRef.current,
+            apiFilters,
+            nextPageToken
+          )
+        );
+        setNextPageToken(data.nextPageToken);
+        setQuotaUsed((prev) => prev + data.quotaUsed);
+        setTotalApiCalls((prev) => prev + data.apiCalls);
 
-          const filtered = applyFilters(data.videos, filters);
-          const combined = [...allVideos, ...filtered];
-          const sorted = sortVideos(combined, sortBy);
-          setAllVideos(sorted);
-          setDisplayedCount(Math.min(displayedCount + PAGE_SIZE, sorted.length));
-        }
+        const seen = new Set(rawVideosRef.current.map((v) => v.videoId));
+        const incoming = data.videos.filter((v) => !seen.has(v.videoId));
+        const combinedRaw = [...rawVideosRef.current, ...incoming];
+        rawVideosRef.current = combinedRaw;
+        setRawVideos(combinedRaw);
+        setAllVideos(sortVideos(applyFilters(combinedRaw, filters), sortBy));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
@@ -129,41 +149,43 @@ export function useYouTubeSearch() {
         isLoadingMoreRef.current = false;
       }
     },
-    [allVideos, displayedCount, loading, applyFilters, sortVideos]
+    [loading, nextPageToken, applyFilters, sortVideos]
   );
 
   const reapplyFiltersAndSort = useCallback(
     (filters: SearchFilters, sortBy: SortOption) => {
-      const filtered = applyFilters(allVideos, filters);
-      const sorted = sortVideos(filtered, sortBy);
-      setAllVideos(sorted);
-      setDisplayedCount(Math.min(displayedCount, sorted.length));
+      const filtered = applyFilters(rawVideos, filters);
+      setAllVideos(sortVideos(filtered, sortBy));
     },
-    [allVideos, displayedCount, applyFilters, sortVideos]
+    [rawVideos, applyFilters, sortVideos]
   );
 
   const reset = useCallback(() => {
+    rawVideosRef.current = [];
     setAllVideos([]);
-    setDisplayedCount(0);
+    setRawVideos([]);
     setError(null);
     setHasSearched(false);
     setQuotaUsed(0);
     setTotalApiCalls(0);
     setTotalResults(0);
-    nextPageTokenRef.current = null;
+    setNextPageToken(null);
     currentQueryRef.current = '';
+    currentCategoryRef.current = '';
+    currentApiFiltersRef.current = null;
   }, []);
 
   return {
-    displayedVideos,
+    displayedVideos: allVideos,
     loading,
     error,
     hasSearched,
     hasMore,
+    nextPageToken,
     quotaUsed,
     totalApiCalls,
     totalResults,
-    displayedCount,
+    displayedCount: allVideos.length,
     search,
     loadMore,
     reapplyFiltersAndSort,

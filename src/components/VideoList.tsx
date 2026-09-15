@@ -30,7 +30,7 @@ export function VideoList({ videos, loading, hasMore, onLoadMore }: VideoListPro
             onClick={onLoadMore}
             className="px-8 py-3 text-sm font-semibold text-white bg-gradient-to-r from-red-500 to-rose-600 rounded-xl hover:shadow-lg hover:shadow-red-500/30 transition-all"
           >
-            Cargar más resultados
+            Cargar más videos
           </button>
         </div>
       )}

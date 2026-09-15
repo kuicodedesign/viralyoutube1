@@ -1,4 +1,4 @@
-import type { YouTubeSearchResponse } from '@/types/youtube';
+import type { YouTubeSearchParams, YouTubeSearchResponse } from '@/types/youtube';
 
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
 
@@ -72,9 +72,16 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function toRfc3339Start(date: string): string {
+  return `${date}T00:00:00Z`;
+}
+
+function toRfc3339End(date: string): string {
+  return `${date}T23:59:59Z`;
+}
+
 export async function searchYouTube(
-  query: string,
-  pageToken?: string
+  params: YouTubeSearchParams
 ): Promise<YouTubeSearchResponse> {
   const apiKey = getApiKey();
   if (!apiKey.trim()) {
@@ -89,9 +96,31 @@ export async function searchYouTube(
     part: 'snippet',
     type: 'video',
     maxResults: '50',
-    q: query,
+    order: params.order || 'relevance',
   });
-  if (pageToken) searchParams.set('pageToken', pageToken);
+
+  const query = params.query.trim();
+  if (query) searchParams.set('q', query);
+
+  if (params.categoryId) {
+    searchParams.set('videoCategoryId', params.categoryId);
+  }
+
+  if (params.publishedAfter) {
+    searchParams.set('publishedAfter', toRfc3339Start(params.publishedAfter));
+  }
+
+  if (params.publishedBefore) {
+    searchParams.set('publishedBefore', toRfc3339End(params.publishedBefore));
+  }
+
+  if (params.videoDuration) {
+    searchParams.set('videoDuration', params.videoDuration);
+  }
+
+  if (params.pageToken) {
+    searchParams.set('pageToken', params.pageToken);
+  }
 
   const searchRes = await fetch(`${BASE_URL}/search?${searchParams}`);
   apiCalls++;
@@ -140,7 +169,7 @@ export async function searchYouTube(
   apiCalls++;
   quotaUsed += 1;
 
-  let channelMap: Record<string, number> = {};
+  const channelMap: Record<string, number> = {};
   if (channelRes.ok) {
     const channelData = await channelRes.json();
     const channelItems: ChannelItem[] = channelData.items || [];

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Header } from '@/components/Header';
 import { SearchBar } from '@/components/SearchBar';
 import { FilterPanel } from '@/components/FilterPanel';
@@ -14,6 +14,7 @@ function App() {
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
   const [sortBy, setSortBy] = useState<SortOption>('ratio');
   const [searchQuery, setSearchQuery] = useState('');
+  const [categoryId, setCategoryId] = useState('');
 
   const apiKeyMissing = !isApiKeyConfigured();
 
@@ -32,37 +33,37 @@ function App() {
   } = useYouTubeSearch();
 
   const handleSearch = useCallback(
-    (query: string) => {
+    (query: string, nextCategoryId: string) => {
       setSearchQuery(query);
-      search(query, filters, sortBy);
+      setCategoryId(nextCategoryId);
+      search(query, nextCategoryId, filters, sortBy);
     },
     [search, filters, sortBy]
   );
 
   const handleFiltersChange = useCallback(
-    (newFilters: SearchFilters) => {
-      setFilters(newFilters);
-      if (hasSearched) reapplyFiltersAndSort(newFilters, sortBy);
+    (updater: (prev: SearchFilters) => SearchFilters) => {
+      setFilters((prev) => updater(prev));
     },
-    [hasSearched, sortBy, reapplyFiltersAndSort]
+    []
   );
 
-  const handleSortChange = useCallback(
-    (newSort: SortOption) => {
-      setSortBy(newSort);
-      if (hasSearched) reapplyFiltersAndSort(filters, newSort);
-    },
-    [hasSearched, filters, reapplyFiltersAndSort]
-  );
+  const handleSortChange = useCallback((newSort: SortOption) => {
+    setSortBy(newSort);
+  }, []);
 
   const handleResetFilters = useCallback(() => {
     setFilters(DEFAULT_FILTERS);
-    if (hasSearched) reapplyFiltersAndSort(DEFAULT_FILTERS, sortBy);
-  }, [hasSearched, sortBy, reapplyFiltersAndSort]);
+  }, []);
 
   const handleLoadMore = useCallback(() => {
     loadMore(filters, sortBy);
   }, [loadMore, filters, sortBy]);
+
+  useEffect(() => {
+    if (!hasSearched) return;
+    reapplyFiltersAndSort(filters, sortBy);
+  }, [filters, sortBy, hasSearched, reapplyFiltersAndSort]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -101,40 +102,42 @@ function App() {
           )}
 
           <div className="max-w-3xl mx-auto w-full">
-            <SearchBar onSearch={handleSearch} loading={loading} initialQuery={searchQuery} />
+            <SearchBar
+              onSearch={handleSearch}
+              loading={loading}
+              initialQuery={searchQuery}
+              initialCategoryId={categoryId}
+            />
           </div>
 
+          <FilterPanel
+            filters={filters}
+            onFiltersChange={handleFiltersChange}
+            sortBy={sortBy}
+            onSortChange={handleSortChange}
+            onReset={handleResetFilters}
+          />
           {hasSearched && (
-            <div className="flex flex-col gap-4">
-              <FilterPanel
-                filters={filters}
-                onFiltersChange={handleFiltersChange}
-                sortBy={sortBy}
-                onSortChange={handleSortChange}
-                onReset={handleResetFilters}
-              />
-              <ApiUsageBadge
-                quotaUsed={quotaUsed}
-                apiCalls={totalApiCalls}
-                displayedCount={displayedCount}
-              />
-            </div>
+            <ApiUsageBadge
+              quotaUsed={quotaUsed}
+              apiCalls={totalApiCalls}
+              displayedCount={displayedCount}
+            />
           )}
         </div>
 
         <div className="mt-8">
-          {error ? (
-            <ErrorState message={error} />
-          ) : displayedVideos.length === 0 && !loading ? (
+          {error && <ErrorState message={error} />}
+          {displayedVideos.length === 0 && !loading && !error ? (
             <EmptyState hasSearched={hasSearched} />
-          ) : (
+          ) : displayedVideos.length > 0 || loading ? (
             <VideoList
               videos={displayedVideos}
               loading={loading}
               hasMore={hasMore}
               onLoadMore={handleLoadMore}
             />
-          )}
+          ) : null}
         </div>
       </main>
     </div>
